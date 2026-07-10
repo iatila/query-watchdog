@@ -1,5 +1,7 @@
 # moserra/query-watchdog
 
+English | [Türkçe](README.tr.md)
+
 Runtime query gate for [Nette](https://nette.org) applications. Catches the query problems static analysis can't see — while the page is actually running:
 
 - **Duplicate SELECT / N+1 detector** — every query is fingerprinted with literals normalized to `?`, so `WHERE id = 5` and `WHERE id = 8` count as the *same shape*. When the same shape runs N times in one request (default 5), the request **throws in debug mode** with the shape, an example query, and the fix hint (batch with IN-list/JOIN, or memoize). In production it writes a structured Tracy log instead.
@@ -22,7 +24,7 @@ Both bridges attach automatically to every connection service found in the DI co
 ## Installation
 
 ```bash
-composer config repositories.moserra-query-watchdog vcs https://github.com/moserra/query-watchdog
+composer config repositories.moserra-query-watchdog vcs https://github.com/iatila/query-watchdog
 composer require moserra/query-watchdog
 ```
 
