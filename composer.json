@@ -1,0 +1,24 @@
+{
+    "name": "moserra/query-watchdog",
+    "version": "1.0.0",
+    "description": "Runtime query gate for Nette apps: per-request budget, duplicate-SELECT (N+1) detector, slow-query log. Bridges for nette/database and nextras/dbal.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["nette", "n+1", "query", "profiler", "watchdog", "nette-database", "nextras-dbal", "performance"],
+    "require": {
+        "php": ">=8.2",
+        "nette/di": "^3.1",
+        "nette/schema": "^1.2",
+        "tracy/tracy": "^2.9"
+    },
+    "suggest": {
+        "nette/database": "Auto-attaches to Nette\\Database\\Connection via onQuery",
+        "nextras/dbal": "Auto-attaches to Nextras\\Dbal\\Connection via addLogger"
+    },
+    "autoload": {
+        "psr-4": {
+            "Moserra\\QueryWatchdog\\": "src/"
+        }
+    },
+    "minimum-stability": "stable"
+}
