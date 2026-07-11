@@ -24,6 +24,7 @@ final class QueryWatchdogExtension extends CompilerExtension
         return Expect::structure([
             'budgetPerRequest' => Expect::int(80),
             'duplicateSelectLimit' => Expect::int(5),
+            'exactDuplicateLimit' => Expect::int(2),
             'slowQueryMs' => Expect::int(200),
             'strict' => Expect::bool()->nullable()->default(null),
         ]);
@@ -40,6 +41,7 @@ final class QueryWatchdogExtension extends CompilerExtension
                 'duplicateSelectLimit' => $config->duplicateSelectLimit,
                 'slowQueryMs' => $config->slowQueryMs,
                 'strict' => $config->strict ?? $builder->parameters['debugMode'],
+                'exactDuplicateLimit' => $config->exactDuplicateLimit,
             ]);
     }
 

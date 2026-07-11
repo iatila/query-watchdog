@@ -8,16 +8,26 @@ use Tracy\Debugger;
 use Tracy\ILogger;
 
 /**
- * Framework-bağımsız çekirdek. Sorgular normalize edilmiş parmak iziyle sayılır:
- * literal'ler ?'ye indirgendiği için per-row `WHERE id = 5` çağrıları da aynı parmak
- * ize düşer — N+1 ve memoize edilmemiş tekrar birlikte yakalanır. Tekrar limiti
- * yalnız SELECT'e uygulanır; bütçe her sorguyu sayar. strict = throw, değilse
- * structured Tracy log. Yavaş sorgu süresi nondeterministik olduğundan asla throw
- * etmez, iki modda da log'lanır.
+ * Framework-bağımsız çekirdek. İki tekrar kuralı (yalnız SELECT):
+ *  - ŞEKİL (duplicateSelectLimit, vars. 5): literal'ler ?'ye indirgenir → per-row
+ *    `WHERE id = 5` çağrıları aynı parmak ize düşer, N+1'i yakalar.
+ *  - EXACT (exactDuplicateLimit, vars. 2): literaller KORUNUR (yalnız boşluk normalize).
+ *    Birebir aynı SQL tekrar ederse dönen satırlar da aynıdır → memoize eksikliği;
+ *    yüksek isabet (farklı literal → farklı key, yanlış-pozitif yok), düşük eşik.
+ * Bütçe her sorguyu sayar. strict = throw, değilse structured Tracy log. Yavaş sorgu
+ * süresi nondeterministik olduğundan asla throw etmez, iki modda da log'lanır.
  */
 final class QueryWatchdog
 {
     private const IgnoredPrefixes = ['BEGIN', 'COMMIT', 'ROLLBACK', 'SET ', 'SAVEPOINT', 'RELEASE', 'START TRANSACTION', 'EXPLAIN'];
+
+    /**
+     * Sorguda geçerse tamamen yok sayılır (bütçe/tekrar dışı). Framework şema introspection'ı
+     * (ORM/Explorer FK & kolon reflection'ı) tablo başına aynı information_schema sorgusunu çalıştırır
+     * → uygulama-fixlenemez false-positive; N+1 değildir. Bkz Nette Database Structure reflection.
+     */
+    private const IgnoredSubstrings = ['information_schema', 'pg_catalog', 'sqlite_master'];
+
     private const ReportTopFingerprints = 5;
 
     private int $total = 0;
@@ -27,6 +37,12 @@ final class QueryWatchdog
 
     /** @var array<string, string> */
     private array $examples = [];
+
+    /** @var array<string, int> exact SQL (literaller korunur, yalnız boşluk normalize) → tekrar sayısı */
+    private array $exactCounts = [];
+
+    /** @var array<string, string> */
+    private array $exactExamples = [];
 
     /** @var array<string, true> */
     private array $slowReported = [];
@@ -38,6 +54,7 @@ final class QueryWatchdog
         private readonly int $duplicateSelectLimit,
         private readonly int $slowQueryMs,
         private readonly bool $strict,
+        private readonly int $exactDuplicateLimit = 2,
     ) {
     }
 
@@ -47,6 +64,11 @@ final class QueryWatchdog
         foreach (self::IgnoredPrefixes as $prefix) {
             if (stripos($trimmed, $prefix) === 0) {
                 return;
+            }
+        }
+        foreach (self::IgnoredSubstrings as $needle) {
+            if (stripos($trimmed, $needle) !== false) {
+                return;   // framework şema reflection'ı — sayma (false-positive)
             }
         }
 
@@ -89,6 +111,26 @@ final class QueryWatchdog
                     $this->examples[$fingerprint],
                 ),
                 ['count' => $count, 'shape' => $fingerprint, 'example' => $this->examples[$fingerprint]],
+            );
+        }
+
+        // Exact-duplicate: BİREBİR aynı SQL (literaller dahil) tekrar ederse dönen satırlar da aynıdır →
+        // her zaman israf (memoize eksik). Şekil-tekrarından ayrı, düşük eşik (vars. 2) + yüksek isabet:
+        // "WHERE id=1" vs "id=2" farklı literaller → aynı exact-key'e düşmez, yanlış-pozitif yok.
+        $exactKey = trim((string) preg_replace('/\s+/', ' ', $trimmed));
+        $exactHash = md5($exactKey);
+        $exactCount = ($this->exactCounts[$exactHash] ?? 0) + 1;
+        $this->exactCounts[$exactHash] = $exactCount;
+        $this->exactExamples[$exactHash] ??= $exactKey;
+
+        if ($exactCount === $this->exactDuplicateLimit) {
+            $this->report(
+                sprintf(
+                    "Identical SELECT ran %d× in one request — same SQL returns the same rows; memoize or cache the result (one call, reuse it).\nSQL: %s",
+                    $exactCount,
+                    $this->exactExamples[$exactHash],
+                ),
+                ['count' => $exactCount, 'kind' => 'exact_duplicate', 'sql' => $this->exactExamples[$exactHash]],
             );
         }
     }

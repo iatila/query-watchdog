@@ -5,6 +5,7 @@ English | [Türkçe](README.tr.md)
 Runtime query gate for [Nette](https://nette.org) applications. Catches the query problems static analysis can't see — while the page is actually running:
 
 - **Duplicate SELECT / N+1 detector** — every query is fingerprinted with literals normalized to `?`, so `WHERE id = 5` and `WHERE id = 8` count as the *same shape*. When the same shape runs N times in one request (default 5), the request **throws in debug mode** with the shape, an example query, and the fix hint (batch with IN-list/JOIN, or memoize). In production it writes a structured Tracy log instead.
+- **Exact-duplicate detector** — literals are **kept** (only whitespace is normalized), so the *identical* SQL — same shape *and* same values — running twice returns the same rows: a pure memoization miss. Low threshold (default 2), high precision: `WHERE id = 1` and `WHERE id = 2` never collide, so no false positives. Catches the sub-threshold repeats the shape rule (limit 5) misses — e.g. two code paths fetching the same lookup for the same ids.
 - **Per-request query budget** — more than N queries in one request (default 80) throws/logs with the top repeated shapes listed.
 - **Slow query log** — queries above a threshold (default 200 ms) are logged in both modes. Never throws: durations are nondeterministic (cold caches), so a slow query must not randomly kill a page.
 
@@ -40,7 +41,8 @@ That's it. Optional configuration (defaults shown):
 ```neon
 queryWatchdog:
 	budgetPerRequest: 80
-	duplicateSelectLimit: 5
+	duplicateSelectLimit: 5      # same shape (literals → ?) N× → N+1
+	exactDuplicateLimit: 2       # identical SQL (literals kept) N× → memoization miss
 	slowQueryMs: 200
 	# strict: true    # omit to follow %debugMode% (dev = throw, prod = log)
 ```

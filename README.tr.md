@@ -5,6 +5,7 @@
 [Nette](https://nette.org) uygulamaları için çalışma zamanı sorgu bekçisi. Statik analizin göremediği sorgu problemlerini sayfa gerçekten çalışırken yakalar:
 
 - **Tekrarlı SELECT / N+1 dedektörü** — her sorgu, literal'leri `?`'ye normalize edilmiş parmak iziyle sayılır; yani `WHERE id = 5` ile `WHERE id = 8` *aynı kalıp* sayılır. Aynı kalıp bir request'te N kez koşarsa (varsayılan 5), debug modda request **exception ile patlar** — mesajda kalıp, örnek sorgu ve çözüm ipucu (IN-list/JOIN ile batch'le ya da memoize et) yazar. Production'da bunun yerine structured Tracy log'u yazılır.
+- **Birebir-tekrar (exact) dedektörü** — literal'ler **korunur** (yalnız boşluk normalize edilir); yani *birebir aynı* SQL — hem kalıp hem değerler aynı — iki kez koşarsa dönen satırlar da aynıdır: saf memoize eksikliği. Düşük eşik (varsayılan 2), yüksek isabet: `WHERE id = 1` ile `WHERE id = 2` asla çakışmaz, yanlış-pozitif yok. Kalıp kuralının (limit 5) kaçırdığı eşik-altı tekrarları yakalar — ör. iki kod yolunun aynı id'ler için aynı lookup'ı çekmesi.
 - **Request başına sorgu bütçesi** — bir request'te N sorgudan fazlası (varsayılan 80) throw/log — en çok tekrar eden kalıplar listelenir.
 - **Yavaş sorgu log'u** — eşiği aşan sorgular (varsayılan 200 ms) iki modda da log'lanır. Asla throw etmez: süre deterministik değildir (soğuk cache), yavaş bir sorgu rastgele sayfa öldürmemeli.
 
@@ -40,7 +41,8 @@ Bu kadar. Opsiyonel ayarlar (varsayılanlar gösterildi):
 ```neon
 queryWatchdog:
 	budgetPerRequest: 80
-	duplicateSelectLimit: 5
+	duplicateSelectLimit: 5      # aynı KALIP (literal→?) N× → N+1
+	exactDuplicateLimit: 2       # BİREBİR aynı SQL (literaller korunur) N× → memoize eksikliği
 	slowQueryMs: 200
 	# strict: true    # verilmezse %debugMode% izlenir (dev = throw, prod = log)
 ```
