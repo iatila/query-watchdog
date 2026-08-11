@@ -28,6 +28,18 @@ final class QueryWatchdog
      */
     private const IgnoredSubstrings = ['information_schema', 'pg_catalog', 'sqlite_master'];
 
+    /**
+     * Aynı metnin aynı satırları döndürmediği SELECT'ler. Exact-duplicate kuralı
+     * "aynı SQL → aynı sonuç" varsayar; bunlarda varsayım tutmaz:
+     *  - kilitleyenler (FOR UPDATE/SHARE, advisory) — amaç satır değil kilittir ve
+     *    SKIP LOCKED ile her çağrı BAŞKA satır döndürür (kuyruk tüketimi),
+     *  - dizi ilerletenler (nextval) — her çağrı yeni değer,
+     *  - rastgelelik.
+     * `now()` KASTEN listede yok: PostgreSQL'de işlem başlangıç zamanıdır, aynı
+     * işlem içinde sabittir — muaf tutmak kuralda gerçek bir delik açardı.
+     */
+    private const NonDeterministicPatterns = ['for update', 'for share', 'for no key update', 'nextval(', 'pg_advisory', 'random()', 'skip locked'];
+
     private const ReportTopFingerprints = 5;
 
     private int $total = 0;
@@ -46,6 +58,13 @@ final class QueryWatchdog
 
     /** @var array<string, true> */
     private array $slowReported = [];
+
+    /**
+     * Yazma kuşağı. "Oku → yaz → yeniden oku" meşru bir sıradır: ikinci okuma
+     * artık başka satırlar döndürür, israf değildir. Sayaçlar anahtarlarında bu
+     * numarayı taşır, böylece yazmadan sonraki okuma sıfırdan başlar.
+     */
+    private int $writeGeneration = 0;
 
     private bool $budgetReported = false;
 
@@ -94,6 +113,12 @@ final class QueryWatchdog
         }
 
         if (stripos($trimmed, 'SELECT') !== 0) {
+            // İşlem defteri (BEGIN/COMMIT/SET…) yukarıda elendi; kalan her
+            // SELECT-dışı ifade veriyi değiştirebilir. CTE ile başlayan salt
+            // okuma (`WITH … SELECT`) da buraya düşer: kuralı yalnız GEVŞETİR,
+            // yanlış-pozitif üretmez.
+            $this->writeGeneration++;
+
             return;
         }
 
@@ -114,11 +139,18 @@ final class QueryWatchdog
             );
         }
 
-        // Exact-duplicate: BİREBİR aynı SQL (literaller dahil) tekrar ederse dönen satırlar da aynıdır →
-        // her zaman israf (memoize eksik). Şekil-tekrarından ayrı, düşük eşik (vars. 2) + yüksek isabet:
-        // "WHERE id=1" vs "id=2" farklı literaller → aynı exact-key'e düşmez, yanlış-pozitif yok.
+        // Exact-duplicate: BİREBİR aynı SQL (literaller dahil) AYNI yazma kuşağında
+        // tekrar ederse dönen satırlar da aynıdır → israf (memoize eksik).
+        // Şekil-tekrarından ayrı, düşük eşik (vars. 2) + yüksek isabet: "WHERE id=1"
+        // vs "id=2" farklı literaller → aynı exact-key'e düşmez.
+        // Şekil kuralı kuşaktan ETKİLENMEZ: döngü içinde "satırı güncelle, satırı
+        // oku" da N+1'dir, araya yazma girmesi onu masum yapmaz.
         $exactKey = trim((string) preg_replace('/\s+/', ' ', $trimmed));
-        $exactHash = md5($exactKey);
+        if ($this->isNonDeterministic($exactKey)) {
+            return;
+        }
+
+        $exactHash = md5($this->writeGeneration . '|' . $exactKey);
         $exactCount = ($this->exactCounts[$exactHash] ?? 0) + 1;
         $this->exactCounts[$exactHash] = $exactCount;
         $this->exactExamples[$exactHash] ??= $exactKey;
@@ -156,6 +188,18 @@ final class QueryWatchdog
         }
 
         return $lines;
+    }
+
+    private function isNonDeterministic(string $sql): bool
+    {
+        $lower = strtolower($sql);
+        foreach (self::NonDeterministicPatterns as $pattern) {
+            if (str_contains($lower, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function fingerprint(string $sql): string

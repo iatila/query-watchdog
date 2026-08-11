@@ -5,11 +5,18 @@
 [Nette](https://nette.org) uygulamaları için çalışma zamanı sorgu bekçisi. Statik analizin göremediği sorgu problemlerini sayfa gerçekten çalışırken yakalar:
 
 - **Tekrarlı SELECT / N+1 dedektörü** — her sorgu, literal'leri `?`'ye normalize edilmiş parmak iziyle sayılır; yani `WHERE id = 5` ile `WHERE id = 8` *aynı kalıp* sayılır. Aynı kalıp bir request'te N kez koşarsa (varsayılan 5), debug modda request **exception ile patlar** — mesajda kalıp, örnek sorgu ve çözüm ipucu (IN-list/JOIN ile batch'le ya da memoize et) yazar. Production'da bunun yerine structured Tracy log'u yazılır.
-- **Birebir-tekrar (exact) dedektörü** — literal'ler **korunur** (yalnız boşluk normalize edilir); yani *birebir aynı* SQL — hem kalıp hem değerler aynı — iki kez koşarsa dönen satırlar da aynıdır: saf memoize eksikliği. Düşük eşik (varsayılan 2), yüksek isabet: `WHERE id = 1` ile `WHERE id = 2` asla çakışmaz, yanlış-pozitif yok. Kalıp kuralının (limit 5) kaçırdığı eşik-altı tekrarları yakalar — ör. iki kod yolunun aynı id'ler için aynı lookup'ı çekmesi.
+- **Birebir-tekrar (exact) dedektörü** — literal'ler **korunur** (yalnız boşluk normalize edilir); yani *birebir aynı* SQL — hem kalıp hem değerler aynı — iki kez koşarsa dönen satırlar da aynıdır: saf memoize eksikliği. Düşük eşik (varsayılan 2), yüksek isabet: `WHERE id = 1` ile `WHERE id = 2` asla çakışmaz. Kalıp kuralının (limit 5) kaçırdığı eşik-altı tekrarları yakalar — ör. iki kod yolunun aynı id'ler için aynı lookup'ı çekmesi.
 - **Request başına sorgu bütçesi** — bir request'te N sorgudan fazlası (varsayılan 80) throw/log — en çok tekrar eden kalıplar listelenir.
 - **Yavaş sorgu log'u** — eşiği aşan sorgular (varsayılan 200 ms) iki modda da log'lanır. Asla throw etmez: süre deterministik değildir (soğuk cache), yavaş bir sorgu rastgele sayfa öldürmemeli.
 
 Transaction kontrol ifadeleri (`BEGIN`, `COMMIT`, `SET`, `EXPLAIN`, …) sayılmaz. Tekrar kuralı yalnız SELECT'lere uygulanır.
+
+### Birebir-tekrar kuralının geri çekildiği yerler
+
+Kural *aynı SQL → aynı satırlar* varsayar. Bu varsayımın tutmadığı iki durum var; ikisi de karşılanıyor:
+
+- **Arada yazma olmuşsa.** "Oku → yaz → yeniden oku" meşru bir sıradır; ikinci okuma gerçekten başka satır döndürür. SELECT olmayan her ifade (işlem defteri hariç) yeni bir kuşak açar, tekrar sayımı sıfırdan başlar. CTE ile başlayan salt okuma (`WITH … SELECT`) burada yazma sayılır: bu kuralı yalnız gevşetir, yanlış rapor üretemez. **Kalıp** kuralı kuşaktan kasten etkilenmez — döngü içinde "satırı güncelle, satırı oku" hâlâ N+1'dir.
+- **İfade deterministik değilse.** Kilitleyen okumalar (`FOR UPDATE`/`FOR SHARE`, `SKIP LOCKED`, advisory kilitler), dizi okumaları (`nextval`) ve `random()` muaftır: amaç kilit ya da yan etkidir ve `SKIP LOCKED` tasarımı gereği her çağrıda *başka* satır döndürür. `now()` muaf **değildir** — PostgreSQL'de işlem başlangıç zamanıdır, işlem içinde sabittir.
 
 ## Neden
 

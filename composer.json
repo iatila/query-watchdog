@@ -1,6 +1,6 @@
 {
     "name": "moserra/query-watchdog",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Runtime query gate for Nette apps: per-request budget, duplicate-SELECT (N+1) detector, slow-query log. Bridges for nette/database and nextras/dbal.",
     "type": "library",
     "license": "MIT",
@@ -19,6 +19,9 @@
         "psr-4": {
             "Moserra\\QueryWatchdog\\": "src/"
         }
+    },
+    "scripts": {
+        "test": "@php tests/duplicate-rules.php"
     },
     "minimum-stability": "stable"
 }
