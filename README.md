@@ -74,3 +74,15 @@ If a page legitimately needs more, raise the limits in config — but treat that
 ## License
 
 MIT
+
+## Suspending for batch jobs
+
+The rules assume ONE request: repeating the same SELECT or blowing the query budget is
+a smell in a request. Batch jobs (seeders, imports) do both on purpose — one code-sequence
+read per record, one validation per record — so a warning there is a false alarm, and in
+`strict` mode it aborts the job.
+
+```php
+$watchdog->suspend();   // at console application boot
+$watchdog->resume();    // also resets the counters
+```

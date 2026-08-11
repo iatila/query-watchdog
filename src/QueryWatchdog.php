@@ -53,6 +53,8 @@ final class QueryWatchdog
     /** @var array<string, int> exact SQL (literaller korunur, yalnız boşluk normalize) → tekrar sayısı */
     private array $exactCounts = [];
 
+    private bool $suspended = false;
+
     /** @var array<string, string> */
     private array $exactExamples = [];
 
@@ -77,8 +79,34 @@ final class QueryWatchdog
     ) {
     }
 
+    /**
+     * Toplu iş kipi. Kurallar "BİR İSTEK" varsayımına dayanır: aynı SELECT'i
+     * tekrarlamak, bütçeyi aşmak bir istekte kokudur. Tohumlayıcı/içe aktarma
+     * gibi konsol işleri bunu bilerek yapar (kayıt başına kod serisi okuma, kayıt
+     * başına doğrulama) ve orada uyarı yanlış alarmdır — istek yok ki.
+     */
+    public function suspend(): void
+    {
+        $this->suspended = true;
+    }
+
+    public function resume(): void
+    {
+        $this->suspended = false;
+        $this->total = 0;
+        $this->selectCounts = [];
+        $this->examples = [];
+        $this->exactCounts = [];
+        $this->exactExamples = [];
+        $this->slowReported = [];
+    }
+
     public function onQuery(string $sql, float $timeTaken): void
     {
+        if ($this->suspended) {
+            return;
+        }
+
         $trimmed = ltrim($sql);
         foreach (self::IgnoredPrefixes as $prefix) {
             if (stripos($trimmed, $prefix) === 0) {

@@ -74,3 +74,15 @@ Bir sayfanın gerçekten daha fazlasına ihtiyacı varsa limitleri config'ten y�
 ## Lisans
 
 MIT
+
+## Toplu işlerde susturma
+
+Kurallar "bir istek" varsayımına dayanır: aynı SELECT'i tekrarlamak, istek bütçesini
+aşmak bir istekte kokudur. Tohumlayıcı/içe aktarma gibi toplu işler bunu bilerek yapar
+(kayıt başına kod serisi okuma, kayıt başına doğrulama) — orada uyarı yanlış alarmdır,
+`strict` kipte üstelik işi durdurur.
+
+```php
+$watchdog->suspend();   // konsol uygulamasının açılışında
+$watchdog->resume();    // sayaçları da sıfırlar
+```
